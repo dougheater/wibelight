@@ -27,7 +27,7 @@ include $(DEVKITPRO)/wut/share/wut_rules
 # INCLUDES is a list of directories containing header files
 #-------------------------------------------------------------------------------
 TARGET		:=	wibelight
-VERSION		:=	1.0.1
+VERSION		:=	1.0.2
 BUILD		:=	build
 SOURCES		:=	src \
 				src/wiiu \

@@ -156,6 +156,7 @@ int active_profile = 0;
 // Forward refs to globals defined later in this file
 extern int wol_enabled;
 extern char wol_mac[];
+extern int wol_wait_seconds;
 
 // Profile selector state
 static int profile_cursor = 0; // Which profile row is selected
@@ -186,6 +187,7 @@ static void profile_set_defaults(profile_t *p, int idx) {
     p->ip[0] = 192; p->ip[1] = 168; p->ip[2] = 1; p->ip[3] = 0;
     memset(p->wol_mac, 0, PROFILE_WOL_MAC_LEN);
     p->wol_enabled = 0;
+    p->wol_wait_seconds = 25;
     p->width = 854; p->height = 480; p->fps = 60; p->bitrate = 3000;
     p->packetSize = 1024;
     p->colorSpace = COLORSPACE_REC_709;
@@ -311,6 +313,7 @@ static void profile_load(int idx, PCONFIGURATION cfg) {
     wol_enabled = p->wol_enabled;
     strncpy(wol_mac, p->wol_mac, PROFILE_WOL_MAC_LEN - 1);
     wol_mac[PROFILE_WOL_MAC_LEN - 1] = '\0';
+    wol_wait_seconds = p->wol_wait_seconds;
 
     // Theme
     theme_bg_preset = p->theme_bg;
@@ -334,6 +337,7 @@ static void profile_save(int idx, const PCONFIGURATION cfg) {
     }
     strncpy(p->wol_mac, wol_mac, PROFILE_WOL_MAC_LEN);
     p->wol_enabled = wol_enabled;
+    p->wol_wait_seconds = wol_wait_seconds;
 
     p->width = cfg->stream.width;
     p->height = cfg->stream.height;
@@ -404,7 +408,7 @@ static const int section_child_count[NUM_SECTIONS] = {
     7, // Video: Resolution, FPS, Bitrate, Color Space, Color Range, Max Queued Frames, Rotate
     3, // Audio: Surround, Audio Buffer, Local Audio
     6, // Input: Swap Buttons, Mouse Mode, Enable Rumble, Rumble Strength, Menu Rumble, Disable GamePad
-    4, // Network: Packet Size, Server IP, Wake-on-LAN, MAC Address
+    5, // Network: Packet Size, Server IP, Wake-on-LAN, MAC Address, Wait Time
     5, // Behavior: Quit After, View Only, App, Auto Stream, Auto Connect
     5  // Appearance: Background, Accent Color, Text Contrast, Button Color, Logo
 };
@@ -420,7 +424,7 @@ static const char *section_children[NUM_SECTIONS][7] = {
     // Input
     {"Swap Buttons:", "Mouse Mode:", "Enable Rumble:", "Rumble Strength:", "Menu Rumble:", "Disable GamePad:"},
     // Network
-    {"Packet Size:", "Server IP:", "Wake-on-LAN:", "MAC Address:"},
+    {"Packet Size:", "Server IP:", "Wake-on-LAN:", "MAC Address:", "WoL Wait:"},
     // Behavior
     {"Quit After:", "View Only:", "App:", "Auto Stream:", "Auto Connect:"},
     // Appearance
@@ -473,16 +477,16 @@ static int section_child_to_setting_idx(int sec, int child)
   // Video:0-6   Resolution,FPS,Bitrate,ColorSpace,ColorRange,MaxQueuedFrames,Rotate
   // Audio:7-9   Surround,AudioBuffer,LocalAudio
   // Input:10-15 SwapButtons,MouseMode,Rumble,RumbleStrength,NavClick,DisableGamePad
-  // Network:16-19 PacketSize,ServerIP,WakeOnLAN,MACAddress
-  // Behavior:20-24 QuitAfter,ViewOnly,App,AutoStream,AutoConnect
-  // Appearance:25-29 Background,AccentColor,TextContrast,ButtonColor,Logo
+  // Network:16-20 PacketSize,ServerIP,WakeOnLAN,MACAddress,WaitTime
+  // Behavior:21-25 QuitAfter,ViewOnly,App,AutoStream,AutoConnect
+  // Appearance:26-30 Background,AccentColor,TextContrast,ButtonColor,Logo
   static const int section_child_offset[NUM_SECTIONS] = {
       0,   // Video
       7,   // Audio
       10,  // Input
       16,  // Network
-      20,  // Behavior
-      25   // Appearance
+      21,  // Behavior
+      26   // Appearance
   };
   return section_child_offset[sec] + child;
 }
@@ -521,13 +525,14 @@ static int benchmark_was_from_disconnected =
 
 // Wake-on-LAN state
 #define WOL_MAC_LEN PROFILE_WOL_MAC_LEN
+#define WOL_WAIT_DEFAULT 25          // Default wait time if not yet loaded from profile
+#define WOL_MAX_ATTEMPTS 3           // Maximum WoL resend attempts before giving up
 int wol_enabled = 0;             // non-static: read by config.c
 char wol_mac[WOL_MAC_LEN] = {0}; // Auto-detected from serverinfo on first connect
+int wol_wait_seconds = WOL_WAIT_DEFAULT; // User-adjustable WoL wait (seconds)
 static int wol_source_state = STATE_DISCONNECTED; // Where to return after WoL
 static uint64_t wol_start_time = 0;
 static int wol_attempt = 0;          // Current WoL attempt (1-based)
-#define WOL_WAIT_SECONDS 10          // How long to wait after sending WoL before retrying
-#define WOL_MAX_ATTEMPTS 3           // Maximum WoL resend attempts before giving up
 
 void benchmark_status(int status) {
   if (!benchmark_running)
@@ -1305,34 +1310,37 @@ int main(int argc, char *argv[]) {
               case 19: // MAC Address
                 snprintf(val, sizeof(val), "%s", wol_mac[0] != '\0' ? wol_mac : "(not detected)");
                 break;
-              case 20: // Quit After
+              case 20: // WoL Wait Time
+                snprintf(val, sizeof(val), "%d s", wol_wait_seconds);
+                break;
+              case 21: // Quit After
                 snprintf(val, sizeof(val), "%s", BOOL_LABELS[config.quitappafter]);
                 break;
-              case 21: // View Only
+              case 22: // View Only
                 snprintf(val, sizeof(val), "%s", BOOL_LABELS[config.viewonly]);
                 break;
-              case 22: // App
+              case 23: // App
                 snprintf(val, sizeof(val), "%s", APP_LABELS[find_app_index(config.app)]);
                 break;
-              case 23: // Auto Stream
+              case 24: // Auto Stream
                 snprintf(val, sizeof(val), "%s", BOOL_LABELS[autostream]);
                 break;
-              case 24: // Auto Connect
+              case 25: // Auto Connect
                 snprintf(val, sizeof(val), "%s", BOOL_LABELS[autostart_connect]);
                 break;
-              case 25: // Background
+              case 26: // Background
                 snprintf(val, sizeof(val), "%s", bg_labels[theme_bg_preset]);
                 break;
-              case 26: // Accent Color
+              case 27: // Accent Color
                 snprintf(val, sizeof(val), "%s", accent_labels[theme_accent_preset]);
                 break;
-              case 27: // Text Contrast
+              case 28: // Text Contrast
                 snprintf(val, sizeof(val), "%s", text_labels[theme_text_preset]);
                 break;
-              case 28: // Button Color
+              case 29: // Button Color
                 snprintf(val, sizeof(val), "%s", btn_labels[theme_btn_preset]);
                 break;
-              case 29: // Logo
+              case 30: // Logo
                 snprintf(val, sizeof(val), "%s", logo_labels[theme_logo_preset]);
                 break;
               default:
@@ -1550,15 +1558,31 @@ int main(int argc, char *argv[]) {
           case 19: { // MAC Address — read-only display, no toggle
             break;
           }
-          case 20: { // Quit After
+          case 20: { // WoL Wait Time — cycle 10 → 15 → 20 → 25 → 30 → 45 → 60
+            static const int wait_presets[] = {10, 15, 20, 25, 30, 45, 60};
+            static const int num_wait_presets = 7;
+            int wi = 0;
+            for (int i = 0; i < num_wait_presets; i++) {
+                if (wol_wait_seconds == wait_presets[i]) {
+                    wi = (i + 1) % num_wait_presets;
+                    break;
+                }
+                if (i == num_wait_presets - 1) {
+                    wi = 0;
+                }
+            }
+            wol_wait_seconds = wait_presets[wi];
+            break;
+          }
+          case 21: { // Quit After
             config.quitappafter = !config.quitappafter;
             break;
           }
-          case 21: { // View Only
+          case 22: { // View Only
             config.viewonly = !config.viewonly;
             break;
           }
-          case 22: { // App
+          case 23: { // App
             {
               int app_idx = find_app_index(config.app);
               app_idx = (app_idx + 1) % NUM_APPS;
@@ -1568,15 +1592,15 @@ int main(int argc, char *argv[]) {
             }
             break;
           }
-          case 23: { // Auto Stream
+          case 24: { // Auto Stream
             autostream = !autostream;
             break;
           }
-          case 24: { // Auto Connect
+          case 25: { // Auto Connect
             autostart_connect = !autostart_connect;
             break;
           }
-          case 25: { // Background
+          case 26: { // Background
             theme_bg_preset = (theme_bg_preset + 1) % NUM_BG_PRESETS;
             // Auto-adjust text contrast to maintain readability
             theme_apply();
@@ -1585,22 +1609,22 @@ int main(int argc, char *argv[]) {
             theme_apply();
             break;
           }
-          case 26: { // Accent Color
+          case 27: { // Accent Color
             theme_accent_preset = (theme_accent_preset + 1) % NUM_ACCENT_PRESETS;
             theme_apply();
             break;
           }
-          case 27: { // Text Contrast
+          case 28: { // Text Contrast
             theme_text_preset = (theme_text_preset + 1) % NUM_TEXT_PRESETS;
             theme_apply();
             break;
           }
-          case 28: { // Button Color
+          case 29: { // Button Color
             theme_btn_preset = (theme_btn_preset + 1) % NUM_BTN_PRESETS;
             theme_apply();
             break;
           }
-          case 29: { // Logo
+          case 30: { // Logo
             theme_logo_preset = (theme_logo_preset + 1) % NUM_LOGO_PRESETS;
             break;
           }
@@ -1710,7 +1734,7 @@ int main(int argc, char *argv[]) {
       }
 
       uint64_t elapsed = OSGetTime() - wol_start_time;
-      int remaining = WOL_WAIT_SECONDS - (int)(elapsed / OSSecondsToTicks(1));
+      int remaining = wol_wait_seconds - (int)(elapsed / OSSecondsToTicks(1));
       if (remaining < 0) remaining = 0;
 
       Font_Clear();
@@ -1771,7 +1795,7 @@ int main(int argc, char *argv[]) {
       Font_Draw_TVDRC();
 
       /* Check if wait time has elapsed */
-      if (elapsed >= OSSecondsToTicks(WOL_WAIT_SECONDS)) {
+      if (elapsed >= OSSecondsToTicks(wol_wait_seconds)) {
         wol_start_time = 0;
         wol_attempt++;
         if (wol_attempt <= WOL_MAX_ATTEMPTS) {
@@ -2044,6 +2068,7 @@ int main(int argc, char *argv[]) {
       /* Clear any stale message from WoL or previous errors */
       message_buffer[0] = '\0';
       is_error = 0;
+      wol_attempt = 0; // Reset WoL attempt counter on successful connection
       state = STATE_CONNECTED;
       break;
     }

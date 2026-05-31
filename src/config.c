@@ -330,6 +330,7 @@ static cJSON *profile_to_json(const profile_t *p) {
     if (p->wol_mac[0] != '\0')
         cJSON_AddStringToObject(obj, "wol_mac", p->wol_mac);
     cJSON_AddBoolToObject(obj, "wol_enabled", p->wol_enabled);
+    cJSON_AddNumberToObject(obj, "wol_wait_seconds", p->wol_wait_seconds);
 
     // Video
     cJSON_AddNumberToObject(obj, "width", p->width);
@@ -404,6 +405,8 @@ static void json_to_profile(cJSON *obj, profile_t *p) {
     }
     item = cJSON_GetObjectItem(obj, "wol_enabled");
     if (item && (item->type & (cJSON_False|cJSON_True))) p->wol_enabled = item->valueint;
+    item = cJSON_GetObjectItem(obj, "wol_wait_seconds");
+    if (item && item->type == cJSON_Number) p->wol_wait_seconds = item->valueint;
 
     // Video
     item = cJSON_GetObjectItem(obj, "width");

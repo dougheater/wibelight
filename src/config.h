@@ -44,6 +44,7 @@ typedef struct {
     uint8_t ip[4];
     char wol_mac[PROFILE_WOL_MAC_LEN];
     int wol_enabled;
+    int wol_wait_seconds;
     // Video
     int width, height, fps, bitrate, packetSize;
     int colorSpace, colorRange;
